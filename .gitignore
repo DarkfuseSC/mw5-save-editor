@@ -1,0 +1,13 @@
+/target/
+*.log
+/reference/
+Cargo.lock.bak
+
+reference/fixtures/synthetic/
+reference/fixtures/repaired/
+dist/
+*.bak
+*.tmp
+/mw5save.exe
+reference/fixtures/edits/
+reference/*.txt

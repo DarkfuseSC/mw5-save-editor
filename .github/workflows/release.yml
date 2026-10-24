@@ -1,0 +1,44 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release --locked
+      - name: Collect
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/MW5SaveEditor.exe dist/
+          Copy-Item target/release/mw5save.exe dist/
+          Copy-Item README.md, LICENSE dist/
+          Get-FileHash dist/*.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content dist/SHA256SUMS.txt
+          Get-Content dist/SHA256SUMS.txt
+          Compress-Archive -Path dist/* -DestinationPath MW5SaveEditor-${{ github.ref_name }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MW5SaveEditor
+          path: |
+            dist/*
+            MW5SaveEditor-*.zip
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/MW5SaveEditor.exe
+            dist/mw5save.exe
+            dist/SHA256SUMS.txt
+            MW5SaveEditor-*.zip
+          body_path: dist/SHA256SUMS.txt

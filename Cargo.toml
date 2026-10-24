@@ -1,0 +1,34 @@
+[package]
+name = "mw5save"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "MechWarrior 5: Mercenaries save file parser, editor and repair tool"
+
+[lib]
+name = "mw5save"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mw5save"
+path = "src/main.rs"
+
+[[bin]]
+name = "MW5SaveEditor"
+path = "src/gui.rs"
+
+[dependencies]
+eframe = { version = "0.28", default-features = false, features = ["default_fonts", "glow"] }
+egui = "0.28"
+rfd = { version = "0.14", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[build-dependencies]
+winresource = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
