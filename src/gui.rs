@@ -16,7 +16,50 @@ fn app_icon() -> Option<egui::IconData> {
     Some(egui::IconData { rgba: img.into_raw(), width: w, height: h })
 }
 
-fn main() -> eframe::Result<()> {
+// ---------------------------------------------------------------------------
+// Startup robustness: crash log beside the exe, native message box, renderer
+// fallback. A GUI-subsystem exe has no console, so without these a failure is
+// invisible to the user.
+// ---------------------------------------------------------------------------
+
+#[cfg(windows)]
+fn message_box(title: &str, text: &str) {
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(hwnd: *mut std::ffi::c_void, text: *const u16, caption: *const u16, utype: u32) -> i32;
+    }
+    let to_w = |s: &str| -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() };
+    let (t, c) = (to_w(text), to_w(title));
+    // MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST
+    unsafe { MessageBoxW(std::ptr::null_mut(), t.as_ptr(), c.as_ptr(), 0x0 | 0x10 | 0x10000 | 0x40000); }
+}
+#[cfg(not(windows))]
+fn message_box(title: &str, text: &str) {
+    eprintln!("{}: {}", title, text);
+}
+
+fn crash_log_path() -> PathBuf {
+    std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("crash.log")))
+        .unwrap_or_else(|| PathBuf::from("crash.log"))
+}
+
+fn log_line(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(crash_log_path()) {
+        let _ = writeln!(f, "[{} v{}] {}", APP_NAME, VERSION, msg);
+    }
+}
+
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let msg = format!("panic: {}", info);
+        log_line(&msg);
+        message_box(&format!("{} crashed", APP_NAME),
+            &format!("{}\n\nDetails were written to:\n{}\n\nPlease attach that file to a bug report.", info, crash_log_path().display()));
+    }));
+}
+
+fn run(renderer: eframe::Renderer) -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1100.0, 720.0])
         .with_min_inner_size([800.0, 500.0])
@@ -25,11 +68,29 @@ fn main() -> eframe::Result<()> {
     if let Some(icon) = app_icon() {
         viewport = viewport.with_icon(icon);
     }
-    let opts = eframe::NativeOptions { viewport, ..Default::default() };
+    let opts = eframe::NativeOptions { viewport, renderer, ..Default::default() };
     eframe::run_native(APP_NAME, opts, Box::new(|cc| {
         cc.egui_ctx.set_pixels_per_point(1.15);
         Ok(Box::new(App::default()))
     }))
+}
+
+fn main() {
+    install_panic_hook();
+    // OpenGL first (smallest footprint, works on most desktops); if the driver
+    // or session cannot provide a GL context, retry on the wgpu backend
+    // (DirectX 12 / Vulkan), then explain instead of vanishing.
+    let first = run(eframe::Renderer::Glow);
+    if let Err(e) = first {
+        log_line(&format!("glow renderer failed: {}", e));
+        if let Err(e2) = run(eframe::Renderer::Wgpu) {
+            log_line(&format!("wgpu renderer failed: {}", e2));
+            message_box(&format!("{} could not start", APP_NAME),
+                &format!("Could not create a window with either OpenGL or DirectX/Vulkan.\n\nOpenGL: {}\nDirectX/Vulkan: {}\n\nUpdate your graphics driver, or run on a machine with a GPU (remote desktop sessions often have none).\nDetails: {}",
+                    e, e2, crash_log_path().display()));
+            std::process::exit(1);
+        }
+    }
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -180,7 +241,9 @@ impl App {
                     actors: Vec::new(), coyote: Vec::new(), coyote_edit: Vec::new(), coyote_filter: String::new(),
                 };
                 l.refresh();
-                let verdict = if l.report.fatal() { "DAMAGED" } else if l.report.suspect() { "suspect" } else { "clean" };
+                let not_campaign = l.report.findings.iter().any(|f| f.kind == mw5save::diagnose::Kind::NotCampaignSave);
+                let verdict = if not_campaign { "not a campaign save (contacts list, metadata or Instant Action file)" }
+                    else if l.report.fatal() { "DAMAGED, see Diagnose / Repair" } else if l.report.suspect() { "suspect" } else { "clean" };
                 self.status = format!("Opened {} ({} bytes, {})", path.file_name().unwrap_or_default().to_string_lossy(), l.original.len(), verdict);
                 self.tab = if l.report.fatal() { Tab::Diagnose } else { Tab::Overview };
                 self.log.push(self.status.clone());
@@ -326,8 +389,19 @@ impl App {
     fn ui_browser(&mut self, ui: &mut egui::Ui) {
         ui.heading("Save files");
         match &self.saves_root {
-            Some(r) => { ui.label(format!("Folder: {}", r.display())); }
-            None => { ui.label("SaveGames folder not found under %LOCALAPPDATA%\\MW5Mercs. Use Open... or drag a .sav here."); }
+            Some(r) => {
+                ui.label(format!("Folder: {}", r.display()));
+                if self.saves.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label("No campaign saves found in that folder yet. Start or load a campaign once so the game writes one, then press Rescan saves.");
+                }
+            }
+            None => {
+                ui.add_space(4.0);
+                ui.label("The MW5 SaveGames folder was not found at %LOCALAPPDATA%\\MW5Mercs\\Saved\\SaveGames.");
+                ui.label("Steam, GOG and Epic all use that folder once the game has been run at least once. Use Open... or drag a .sav file onto this window to open a save from anywhere else.");
+                ui.label("Xbox / Game Pass (Microsoft Store) saves are stored in a different container format and are not supported yet.");
+            }
         }
         ui.add_space(6.0);
         let mut to_open = None;

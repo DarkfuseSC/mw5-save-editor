@@ -16,6 +16,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
         run: cargo build --release --locked
+      - name: Verify self-contained (no VC++ runtime dependency)
+        shell: pwsh
+        run: |
+          foreach ($exe in "target/release/MW5SaveEditor.exe", "target/release/mw5save.exe") {
+            $bytes = [IO.File]::ReadAllBytes($exe)
+            $text = [Text.Encoding]::ASCII.GetString($bytes)
+            foreach ($dll in "VCRUNTIME140.dll", "VCRUNTIME140_1.dll", "MSVCP140.dll", "api-ms-win-crt-runtime-l1-1-0.dll") {
+              if ($text -match [regex]::Escape($dll)) { throw "$exe imports $dll - not self-contained (crt-static missing)" }
+            }
+            Write-Host "$exe OK: no VC++ redistributable imports"
+          }
       - name: Collect
         shell: pwsh
         run: |

@@ -209,7 +209,12 @@ fn decode_struct_array(payload: &[u8]) -> Option<ArrayBody> {
     let inner_struct = r.fstring().ok()?;
     let inner_guid = guid16(r.read(16).ok()?);
     let inner_leading = r.u8().ok()?;
-    let mut elements = Vec::with_capacity(count as usize);
+    // No preallocation: `count` comes from the file and a corrupt value could
+    // request gigabytes. Each element is at least a 9-byte "None" terminator.
+    if (count as usize) > r.remaining() / 9 + 1 {
+        return None;
+    }
+    let mut elements = Vec::new();
     for _ in 0..count {
         elements.push(read_list(&mut r).ok()?);
     }

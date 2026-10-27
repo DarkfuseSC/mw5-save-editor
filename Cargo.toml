@@ -1,6 +1,6 @@
 [package]
 name = "mw5save"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "MechWarrior 5: Mercenaries save file parser, editor and repair tool"
@@ -18,7 +18,7 @@ name = "MW5SaveEditor"
 path = "src/gui.rs"
 
 [dependencies]
-eframe = { version = "0.28", default-features = false, features = ["default_fonts", "glow"] }
+eframe = { version = "0.28", default-features = false, features = ["default_fonts", "glow", "wgpu"] }
 egui = "0.28"
 rfd = { version = "0.14", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png"] }
